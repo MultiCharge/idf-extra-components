@@ -260,8 +260,9 @@ static esp_err_t clear_feature(msc_device_t *device, uint8_t endpoint)
     return ESP_OK;
 }
 
-esp_err_t msc_mass_reset(msc_device_t *device)
+esp_err_t msc_mass_reset(msc_host_device_handle_t dev)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     usb_transfer_t *xfer = device->xfer;
 
     USB_MASS_REQ_INIT_RESET((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
@@ -270,8 +271,9 @@ esp_err_t msc_mass_reset(msc_device_t *device)
     return ESP_OK;
 }
 
-esp_err_t msc_get_max_lun(msc_device_t *device, uint8_t *lun)
+esp_err_t msc_get_max_lun(msc_host_device_handle_t dev, uint8_t *lun)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     usb_transfer_t *xfer = device->xfer;
 
     USB_MASS_REQ_INIT_GET_MAX_LUN((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
@@ -316,12 +318,13 @@ static esp_err_t bot_execute_command(msc_device_t *device, msc_cbw_t *cbw, void 
 }
 
 
-esp_err_t scsi_cmd_read10(msc_device_t *device,
+esp_err_t scsi_cmd_read10(msc_host_device_handle_t dev,
                           uint8_t *data,
                           uint32_t sector_address,
                           uint32_t num_sectors,
                           uint32_t sector_size)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_read10_t cbw = {
         CBW_BASE_INIT(IN_DIR, CBW_CMD_SIZE(cbw_read10_t), num_sectors * sector_size),
         .opcode = SCSI_CMD_READ10,
@@ -333,12 +336,13 @@ esp_err_t scsi_cmd_read10(msc_device_t *device,
     return bot_execute_command(device, &cbw.base, data, num_sectors * sector_size);
 }
 
-esp_err_t scsi_cmd_write10(msc_device_t *device,
+esp_err_t scsi_cmd_write10(msc_host_device_handle_t dev,
                            const uint8_t *data,
                            uint32_t sector_address,
                            uint32_t num_sectors,
                            uint32_t sector_size)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_write10_t cbw = {
         CBW_BASE_INIT(OUT_DIR, CBW_CMD_SIZE(cbw_write10_t), num_sectors * sector_size),
         .opcode = SCSI_CMD_WRITE10,
@@ -349,8 +353,9 @@ esp_err_t scsi_cmd_write10(msc_device_t *device,
     return bot_execute_command(device, &cbw.base, (void *)data, num_sectors * sector_size);
 }
 
-esp_err_t scsi_cmd_read_capacity(msc_device_t *device, uint32_t *block_size, uint32_t *block_count)
+esp_err_t scsi_cmd_read_capacity(msc_host_device_handle_t dev, uint32_t *block_size, uint32_t *block_count)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_read_capacity_response_t response;
 
     cbw_read_capacity_t cbw = {
@@ -366,8 +371,9 @@ esp_err_t scsi_cmd_read_capacity(msc_device_t *device, uint32_t *block_size, uin
     return ESP_OK;
 }
 
-esp_err_t scsi_cmd_unit_ready(msc_device_t *device)
+esp_err_t scsi_cmd_unit_ready(msc_host_device_handle_t dev)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_unit_ready_t cbw = {
         CBW_BASE_INIT(IN_DIR, CBW_CMD_SIZE(cbw_unit_ready_t), 0),
         .opcode = SCSI_CMD_TEST_UNIT_READY,
@@ -376,8 +382,9 @@ esp_err_t scsi_cmd_unit_ready(msc_device_t *device)
     return bot_execute_command(device, &cbw.base, NULL, 0);
 }
 
-esp_err_t scsi_cmd_sense(msc_device_t *device, scsi_sense_data_t *sense)
+esp_err_t scsi_cmd_sense(msc_host_device_handle_t dev, scsi_sense_data_t *sense)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_sense_response_t response;
 
     cbw_sense_t cbw = {
@@ -400,8 +407,9 @@ esp_err_t scsi_cmd_sense(msc_device_t *device, scsi_sense_data_t *sense)
     return ESP_OK;
 }
 
-esp_err_t scsi_cmd_inquiry(msc_device_t *device)
+esp_err_t scsi_cmd_inquiry(msc_host_device_handle_t dev)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     cbw_inquiry_response_t response = { 0 };
 
     cbw_inquiry_t cbw = {
@@ -413,8 +421,9 @@ esp_err_t scsi_cmd_inquiry(msc_device_t *device)
     return bot_execute_command(device, &cbw.base, &response, sizeof(response) );
 }
 
-esp_err_t scsi_cmd_mode_sense(msc_device_t *device)
+esp_err_t scsi_cmd_mode_sense(msc_host_device_handle_t dev)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     mode_sense_response_t response = { 0 };
 
     mode_sense_t cbw = {
@@ -427,8 +436,9 @@ esp_err_t scsi_cmd_mode_sense(msc_device_t *device)
     return bot_execute_command(device, &cbw.base, &response, sizeof(response) );
 }
 
-esp_err_t scsi_cmd_prevent_removal(msc_device_t *device, bool prevent)
+esp_err_t scsi_cmd_prevent_removal(msc_host_device_handle_t dev, bool prevent)
 {
+    msc_device_t *device = (msc_device_t *)dev;
     prevent_allow_medium_removal_t cbw = {
         CBW_BASE_INIT(OUT_DIR, CBW_CMD_SIZE(prevent_allow_medium_removal_t), 0),
         .opcode = SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL,

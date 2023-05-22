@@ -20,4 +20,4 @@
 - Optimize used heap memory by reusing the Virtual File System buffer
 - Optimize CPU usage by putting the background MSC task to 'Blocked' state indefinitely when there is nothing to do
 - Fix MSC commands for devices on interface numbers other than zero
-- Remove unsafe debug functions for direct access of MSC sectors
+- Replace unsafe debug functions for direct access of MSC sectors with private SCSI commands

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "esp_private/usb_phy.h"
+#include "esp_private/msc_scsi_bot.h"
 #include "usb/usb_host.h"
 #include "usb/msc_host_vfs.h"
 #include "test_common.h"
@@ -232,8 +233,8 @@ static void write_read_sectors(void)
     memset(write_data, 0x55, DISK_BLOCK_SIZE);
     memset(read_data, 0, DISK_BLOCK_SIZE);
 
-    msc_host_write_sector(device, 10, write_data, DISK_BLOCK_SIZE);
-    msc_host_read_sector(device, 10, read_data, DISK_BLOCK_SIZE);
+    scsi_cmd_write10(device, write_data, 10, 1, DISK_BLOCK_SIZE);
+    scsi_cmd_read10(device, read_data, 10, 1, DISK_BLOCK_SIZE);
 
     TEST_ASSERT_EQUAL_MEMORY(write_data, read_data, DISK_BLOCK_SIZE);
 }
@@ -244,7 +245,7 @@ static void erase_storage(void)
     memset(data, 0xFF, DISK_BLOCK_SIZE);
 
     for (int block = 0; block < DISK_BLOCK_NUM; block++) {
-        msc_host_write_sector(device, block, data, DISK_BLOCK_SIZE);
+        scsi_cmd_write10(device, data, block, 1, DISK_BLOCK_SIZE);
     }
 }
 
