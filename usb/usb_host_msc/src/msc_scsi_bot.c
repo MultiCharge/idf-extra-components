@@ -264,7 +264,7 @@ esp_err_t msc_mass_reset(msc_device_t *device)
 {
     usb_transfer_t *xfer = device->xfer;
 
-    USB_MASS_REQ_INIT_RESET((usb_setup_packet_t *)xfer->data_buffer, 0);
+    USB_MASS_REQ_INIT_RESET((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
     MSC_RETURN_ON_ERROR( msc_control_transfer(device, USB_SETUP_PACKET_SIZE) );
 
     return ESP_OK;
@@ -274,7 +274,7 @@ esp_err_t msc_get_max_lun(msc_device_t *device, uint8_t *lun)
 {
     usb_transfer_t *xfer = device->xfer;
 
-    USB_MASS_REQ_INIT_GET_MAX_LUN((usb_setup_packet_t *)xfer->data_buffer, 0);
+    USB_MASS_REQ_INIT_GET_MAX_LUN((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
     MSC_RETURN_ON_ERROR( msc_control_transfer(device, USB_SETUP_PACKET_SIZE + 1) );
 
     *lun = xfer->data_buffer[USB_SETUP_PACKET_SIZE];
@@ -290,7 +290,11 @@ static esp_err_t bot_execute_command(msc_device_t *device, msc_cbw_t *cbw, void 
     MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)cbw, CBW_SIZE, MSC_EP_OUT) );
 
     if (data) {
-        MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)data, size, ep) );
+        if (size <= device->xfer->data_buffer_size) {
+            MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)data, size, ep) );
+        } else {
+            MSC_RETURN_ON_ERROR( msc_bulk_transfer_zero_cpy(device, (uint8_t *)data, size, ep) );
+        }
     }
 
     esp_err_t err = msc_bulk_transfer(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
@@ -428,7 +432,7 @@ esp_err_t scsi_cmd_prevent_removal(msc_device_t *device, bool prevent)
     prevent_allow_medium_removal_t cbw = {
         CBW_BASE_INIT(OUT_DIR, CBW_CMD_SIZE(prevent_allow_medium_removal_t), 0),
         .opcode = SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL,
-        .prevent = 1,
+        .prevent = (uint8_t) prevent,
     };
 
     return bot_execute_command(device, &cbw.base, NULL, 0);

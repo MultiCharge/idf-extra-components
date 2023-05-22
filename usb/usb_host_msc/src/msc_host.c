@@ -22,6 +22,7 @@
 #include "msc_scsi_bot.h"
 #include "usb/usb_types_ch9.h"
 #include "usb/usb_helpers.h"
+#include "soc/soc_memory_layout.h"
 
 static portMUX_TYPE msc_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -45,6 +46,7 @@ static portMUX_TYPE msc_lock = portMUX_INITIALIZER_UNLOCKED;
         }                                       \
     } while(0)
 
+#define DEFAULT_XFER_SIZE   (64) // Transfer size used for all transfers apart from SCSI read/write
 #define WAIT_FOR_READY_TIMEOUT_MS 3000
 #define SCSI_COMMAND_SET    0x06
 #define BULK_ONLY_TRANSFER  0x50
@@ -352,7 +354,6 @@ esp_err_t msc_host_install_device(uint8_t device_address, msc_host_device_handle
     uint32_t block_size, block_count;
     const usb_config_desc_t *config_desc;
     msc_device_t *msc_device;
-    size_t transfer_size = 512; // Normally the smallest block size
 
     MSC_GOTO_ON_FALSE( msc_device = calloc(1, sizeof(msc_device_t)), ESP_ERR_NO_MEM );
 
@@ -366,7 +367,7 @@ esp_err_t msc_host_install_device(uint8_t device_address, msc_host_device_handle
     MSC_GOTO_ON_ERROR( usb_host_device_open(s_msc_driver->client_handle, device_address, &msc_device->handle) );
     MSC_GOTO_ON_ERROR( usb_host_get_active_config_descriptor(msc_device->handle, &config_desc) );
     MSC_GOTO_ON_ERROR( extract_config_from_descriptor(config_desc, &msc_device->config) );
-    MSC_GOTO_ON_ERROR( usb_host_transfer_alloc(transfer_size, 0, &msc_device->xfer) );
+    MSC_GOTO_ON_ERROR( usb_host_transfer_alloc(DEFAULT_XFER_SIZE, 0, &msc_device->xfer) );
     MSC_GOTO_ON_ERROR( usb_host_interface_claim(
                            s_msc_driver->client_handle,
                            msc_device->handle,
@@ -378,14 +379,6 @@ esp_err_t msc_host_install_device(uint8_t device_address, msc_host_device_handle
 
     msc_device->disk.block_size = block_size;
     msc_device->disk.block_count = block_count;
-
-    if (block_size > transfer_size) {
-        usb_transfer_t *larger_xfer;
-        MSC_GOTO_ON_ERROR( usb_host_transfer_alloc(block_size, 0, &larger_xfer) );
-        usb_host_transfer_free(msc_device->xfer);
-        msc_device->xfer = larger_xfer;
-    }
-
     *msc_device_handle = msc_device;
 
     return ESP_OK;
@@ -511,6 +504,46 @@ esp_err_t msc_bulk_transfer(msc_device_t *device, uint8_t *data, size_t size, ms
     }
 
     return ESP_OK;
+}
+
+esp_err_t msc_bulk_transfer_zero_cpy(msc_device_t *device, uint8_t *data, size_t size, msc_endpoint_t ep)
+{
+    esp_err_t ret = ESP_OK;
+    MSC_RETURN_ON_FALSE(esp_ptr_dma_capable(data), ESP_FAIL); // The passed buffer must be DMA capable
+    usb_transfer_t *xfer = device->xfer;
+    uint8_t endpoint = (ep == MSC_EP_IN) ? device->config.bulk_in_ep : device->config.bulk_out_ep;
+    uint8_t *backup_buffer = xfer->data_buffer;
+    size_t backup_size = xfer->data_buffer_size;
+    size_t actual_size;
+
+    uint8_t **ptr = (uint8_t **)(&(xfer->data_buffer));
+    size_t *siz = (size_t *)(&(xfer->data_buffer_size));
+
+    if (is_in_endpoint(endpoint)) {
+        actual_size = usb_round_up_to_mps(size, device->config.bulk_in_mps);
+    } else {
+        actual_size = size;
+    }
+
+    // Attention: Here we modify 'private' members data_buffer and data_buffer_size
+    *ptr = data;
+    *siz = actual_size;
+    xfer->num_bytes = actual_size;
+    xfer->device_handle = device->handle;
+    xfer->bEndpointAddress = endpoint;
+    xfer->callback = transfer_callback;
+    xfer->timeout_ms = 5000;
+    xfer->context = device;
+
+    MSC_GOTO_ON_ERROR( usb_host_transfer_submit(xfer) );
+    if (USB_TRANSFER_STATUS_COMPLETED != wait_for_transfer_done(xfer)) {
+        MSC_GOTO_ON_FALSE(!(USB_TRANSFER_STATUS_STALL == wait_for_transfer_done(xfer)), ESP_ERR_MSC_STALL);
+        ret = ESP_ERR_MSC_INTERNAL;
+    }
+fail:
+    *ptr = backup_buffer;
+    *siz = backup_size;
+    return ret;
 }
 
 esp_err_t msc_control_transfer(msc_device_t *device, size_t len)
