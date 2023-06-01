@@ -63,44 +63,15 @@ static const char *TAG = "USB_MSC_SCSI";
         .cbw_length = cbw_len,                  \
     }
 
-#define FEATURE_SELECTOR_ENDPOINT   0
 #define CSW_SIGNATURE   0x53425355
 #define CBW_SIZE        31
-
-#define USB_MASS_REQ_INIT_RESET(ctrl_req_ptr, intf_num) ({                  \
-    (ctrl_req_ptr)->bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT |           \
-                                    USB_BM_REQUEST_TYPE_TYPE_CLASS |        \
-                                    USB_BM_REQUEST_TYPE_RECIP_INTERFACE;    \
-    (ctrl_req_ptr)->bRequest = 0xFF;                                        \
-    (ctrl_req_ptr)->wValue = 0;                                             \
-    (ctrl_req_ptr)->wIndex = (intf_num);                                    \
-    (ctrl_req_ptr)->wLength = 0;                                            \
-})
-
-#define USB_MASS_REQ_INIT_GET_MAX_LUN(ctrl_req_ptr, intf_num) ({            \
-    (ctrl_req_ptr)->bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN |            \
-                                    USB_BM_REQUEST_TYPE_TYPE_CLASS |        \
-                                    USB_BM_REQUEST_TYPE_RECIP_INTERFACE;    \
-    (ctrl_req_ptr)->bRequest = 0xFE;                                        \
-    (ctrl_req_ptr)->wValue = 0;                                             \
-    (ctrl_req_ptr)->wIndex = (intf_num);                                    \
-    (ctrl_req_ptr)->wLength = 1;                                            \
-})
-
-#define USB_SETUP_PACKET_INIT_CLEAR_FEATURE_EP(ctrl_req_ptr, ep_num) ({     \
-    (ctrl_req_ptr)->bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT |           \
-                                    USB_BM_REQUEST_TYPE_TYPE_STANDARD |     \
-                                    USB_BM_REQUEST_TYPE_RECIP_ENDPOINT;     \
-    (ctrl_req_ptr)->bRequest = USB_B_REQUEST_CLEAR_FEATURE;                 \
-    (ctrl_req_ptr)->wValue = FEATURE_SELECTOR_ENDPOINT;                     \
-    (ctrl_req_ptr)->wIndex = (ep_num);                                      \
-    (ctrl_req_ptr)->wLength = 0;                                            \
-})
 
 #define CWB_FLAG_DIRECTION_IN (1<<7) // device -> host
 
 /**
  * @brief Command Block Wrapper structure
+ *
+ * @see USB Mass Storage Class – Bulk Only Transport, Table 5.1
  */
 typedef struct __attribute__((packed))
 {
@@ -114,6 +85,8 @@ typedef struct __attribute__((packed))
 
 /**
  * @brief Command Status Wrapper structure
+ *
+ * @see USB Mass Storage Class – Bulk Only Transport, Table 5.2
  */
 typedef struct __attribute__((packed))
 {
@@ -248,66 +221,55 @@ static esp_err_t check_csw(msc_csw_t *csw, uint32_t tag)
     return csw_ok ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t clear_feature(msc_device_t *device, uint8_t endpoint)
-{
-    usb_device_handle_t dev = device->handle;
-    usb_transfer_t *xfer = device->xfer;
-
-    MSC_RETURN_ON_ERROR( usb_host_endpoint_clear(dev, endpoint) );
-    USB_SETUP_PACKET_INIT_CLEAR_FEATURE_EP((usb_setup_packet_t *)xfer->data_buffer, endpoint);
-    MSC_RETURN_ON_ERROR( msc_control_transfer(device,  USB_SETUP_PACKET_SIZE) );
-
-    return ESP_OK;
-}
-
-esp_err_t msc_mass_reset(msc_host_device_handle_t dev)
-{
-    msc_device_t *device = (msc_device_t *)dev;
-    usb_transfer_t *xfer = device->xfer;
-
-    USB_MASS_REQ_INIT_RESET((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
-    MSC_RETURN_ON_ERROR( msc_control_transfer(device, USB_SETUP_PACKET_SIZE) );
-
-    return ESP_OK;
-}
-
-esp_err_t msc_get_max_lun(msc_host_device_handle_t dev, uint8_t *lun)
-{
-    msc_device_t *device = (msc_device_t *)dev;
-    usb_transfer_t *xfer = device->xfer;
-
-    USB_MASS_REQ_INIT_GET_MAX_LUN((usb_setup_packet_t *)xfer->data_buffer, device->config.iface_num);
-    MSC_RETURN_ON_ERROR( msc_control_transfer(device, USB_SETUP_PACKET_SIZE + 1) );
-
-    *lun = xfer->data_buffer[USB_SETUP_PACKET_SIZE];
-
-    return ESP_OK;
-}
-
-static esp_err_t bot_execute_command(msc_device_t *device, msc_cbw_t *cbw, void *data, size_t size)
+/**
+ * @brief Execute BOT command
+ *
+ * There are multiple stages in BOT command:
+ * 1. Command transport
+ * 2. Data transport (optional)
+ * 3. Status transport
+ * 3.1. Error recovery (in case of error)
+ *
+ * This function is not 'static' so it could be called from unit test
+ *
+ * @see USB Mass Storage Class – Bulk Only Transport, Chapter 5.3
+ *
+ * @param[in] device MSC device handle
+ * @param[in] cbw    Command Block Wrapper
+ * @param[in] data   Data (optional)
+ * @param[in] size   Size of data in bytes
+ * @return esp_err_t
+ */
+esp_err_t bot_execute_command(msc_device_t *device, msc_cbw_t *cbw, void *data, size_t size)
 {
     msc_csw_t csw;
     msc_endpoint_t ep = (cbw->flags & CWB_FLAG_DIRECTION_IN) ? MSC_EP_IN : MSC_EP_OUT;
 
+    // 1. Command transport
     MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)cbw, CBW_SIZE, MSC_EP_OUT) );
 
+    // 2. Optional data transport
     if (data) {
         if (size <= device->xfer->data_buffer_size) {
             MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)data, size, ep) );
         } else {
-            MSC_RETURN_ON_ERROR( msc_bulk_transfer_zero_cpy(device, (uint8_t *)data, size, ep) );
+            MSC_RETURN_ON_ERROR( msc_bulk_transfer_zcpy(device, (uint8_t *)data, size, ep) );
         }
     }
 
+    // 3. Status transport
     esp_err_t err = msc_bulk_transfer(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
 
+    // 3.1 Error recovery
     if (err == ESP_ERR_MSC_STALL) {
-        ESP_RETURN_ON_ERROR( clear_feature(device, MSC_EP_IN), TAG, "Clear feature failed" );
-        // Try to read csw again after clearing feature
+        // In case of the status transport failure, we can try reading the status again
+        // after clearing feature
+        ESP_RETURN_ON_ERROR( clear_feature(device, device->config.bulk_in_ep), TAG, "Clear feature failed" );
         err = msc_bulk_transfer(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
         if (err) {
-            ESP_RETURN_ON_ERROR( clear_feature(device, MSC_EP_IN), TAG, "Clear feature failed" );
-            ESP_RETURN_ON_ERROR( msc_mass_reset(device), TAG, "Mass reset failed" );
+            // In case the repeated status transport failed we do reset recovery
+            // We don't check the error code here, the command has already failed.
+            msc_host_reset_recovery(device);
             return ESP_FAIL;
         }
     }

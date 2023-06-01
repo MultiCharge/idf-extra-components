@@ -47,10 +47,6 @@ esp_err_t scsi_cmd_prevent_removal(msc_host_device_handle_t device, bool prevent
 
 esp_err_t scsi_cmd_mode_sense(msc_host_device_handle_t device);
 
-esp_err_t msc_mass_reset(msc_host_device_handle_t device);
-
-esp_err_t msc_get_max_lun(msc_host_device_handle_t device, uint8_t *lun);
-
 #ifdef __cplusplus
 }
 #endif

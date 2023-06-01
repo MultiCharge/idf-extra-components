@@ -69,7 +69,7 @@ esp_err_t msc_bulk_transfer(msc_device_t *device_handle, uint8_t *data, size_t s
  * @param[in]    ep            Direction of the transfer
  * @return esp_err_t
  */
-esp_err_t msc_bulk_transfer_zero_cpy(msc_device_t *device_handle, uint8_t *data, size_t size, msc_endpoint_t ep);
+esp_err_t msc_bulk_transfer_zcpy(msc_device_t *device_handle, uint8_t *data, size_t size, msc_endpoint_t ep);
 
 /**
  * @brief Trigger a CTRL transfer to device
@@ -81,6 +81,8 @@ esp_err_t msc_bulk_transfer_zero_cpy(msc_device_t *device_handle, uint8_t *data,
  * @return esp_err_t
  */
 esp_err_t msc_control_transfer(msc_device_t *device_handle, size_t len);
+
+esp_err_t clear_feature(msc_device_t *device, uint8_t endpoint);
 
 #define MSC_GOTO_ON_ERROR(exp) ESP_GOTO_ON_ERROR(exp, fail, TAG, "")
 
