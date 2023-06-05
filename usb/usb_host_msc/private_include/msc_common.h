@@ -42,20 +42,8 @@ typedef struct msc_host_device {
 } msc_device_t;
 
 /**
- * @brief Trigger a BULK transfer to device
- *
- * @param[in]    device_handle MSC device handle
- * @param[inout] data          Data buffer. Direction depends on 'ep'.
- * @param[in]    size          Size of buffer in bytes
- * @param[in]    ep            Direction of the transfer
- * @return esp_err_t
- */
-esp_err_t msc_bulk_transfer(msc_device_t *device_handle, uint8_t *data, size_t size, msc_endpoint_t ep);
-
-/**
  * @brief Trigger a BULK transfer to device: zero copy
  *
- * Version of msc_bulk_transfer() with zero copying of data.
  * Data buffer ownership is transferred to the MSC driver and the application cannot access it before the transfer finishes.
  * The buffer must be DMA capable, as it is going to be accessed by USB DMA.
  *

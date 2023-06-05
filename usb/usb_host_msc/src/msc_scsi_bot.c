@@ -246,31 +246,25 @@ esp_err_t bot_execute_command(msc_device_t *device, msc_cbw_t *cbw, void *data, 
     msc_endpoint_t ep = (cbw->flags & CWB_FLAG_DIRECTION_IN) ? MSC_EP_IN : MSC_EP_OUT;
 
     // 1. Command transport
-    MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)cbw, CBW_SIZE, MSC_EP_OUT) );
+    MSC_RETURN_ON_ERROR( msc_bulk_transfer_zcpy(device, (uint8_t *)cbw, CBW_SIZE, MSC_EP_OUT) );
 
     // 2. Optional data transport
     if (data) {
-        if (size <= device->xfer->data_buffer_size) {
-            MSC_RETURN_ON_ERROR( msc_bulk_transfer(device, (uint8_t *)data, size, ep) );
-        } else {
-            MSC_RETURN_ON_ERROR( msc_bulk_transfer_zcpy(device, (uint8_t *)data, size, ep) );
-        }
+        MSC_RETURN_ON_ERROR( msc_bulk_transfer_zcpy(device, (uint8_t *)data, size, ep) );
     }
 
     // 3. Status transport
-    esp_err_t err = msc_bulk_transfer(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
+    esp_err_t err = msc_bulk_transfer_zcpy(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
 
     // 3.1 Error recovery
     if (err == ESP_ERR_MSC_STALL) {
-        // In case of the status transport failure, we can try reading the status again
-        // after clearing feature
+        // In case of the status transport failure, we can try reading the status again after clearing feature
         ESP_RETURN_ON_ERROR( clear_feature(device, device->config.bulk_in_ep), TAG, "Clear feature failed" );
-        err = msc_bulk_transfer(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
-        if (err) {
+        err = msc_bulk_transfer_zcpy(device, (uint8_t *)&csw, sizeof(msc_csw_t), MSC_EP_IN);
+        if (ESP_OK != err) {
             // In case the repeated status transport failed we do reset recovery
             // We don't check the error code here, the command has already failed.
             msc_host_reset_recovery(device);
-            return ESP_FAIL;
         }
     }
 

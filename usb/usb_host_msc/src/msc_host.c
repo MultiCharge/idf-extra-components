@@ -576,44 +576,6 @@ static usb_transfer_status_t wait_for_transfer_done(usb_transfer_t *xfer)
     return status;
 }
 
-esp_err_t msc_bulk_transfer(msc_device_t *device, uint8_t *data, size_t size, msc_endpoint_t ep)
-{
-    esp_err_t ret;
-    usb_transfer_t *xfer = device->xfer;
-    MSC_RETURN_ON_FALSE(size <= xfer->data_buffer_size, ESP_ERR_INVALID_SIZE);
-    uint8_t endpoint = (ep == MSC_EP_IN) ? device->config.bulk_in_ep : device->config.bulk_out_ep;
-
-    if (is_in_endpoint(endpoint)) {
-        xfer->num_bytes = usb_round_up_to_mps(size, device->config.bulk_in_mps);
-    } else {
-        memcpy(xfer->data_buffer, data, size);
-        xfer->num_bytes = size;
-    }
-
-    xfer->device_handle = device->handle;
-    xfer->bEndpointAddress = endpoint;
-    xfer->callback = transfer_callback;
-    xfer->timeout_ms = 5000;
-    xfer->context = device;
-
-    MSC_RETURN_ON_ERROR( usb_host_transfer_submit(xfer) );
-    const usb_transfer_status_t status = wait_for_transfer_done(xfer);
-    switch (status) {
-    case USB_TRANSFER_STATUS_COMPLETED:
-        ret = ESP_OK; break;
-    case USB_TRANSFER_STATUS_STALL:
-        ret = ESP_ERR_MSC_STALL; break;
-    default:
-        ret = ESP_ERR_MSC_INTERNAL; break;
-    }
-
-    if (is_in_endpoint(endpoint) && (ESP_OK == ret)) {
-        memcpy(data, xfer->data_buffer, size);
-    }
-
-    return ret;
-}
-
 esp_err_t msc_bulk_transfer_zcpy(msc_device_t *device, uint8_t *data, size_t size, msc_endpoint_t ep)
 {
     esp_err_t ret = ESP_OK;

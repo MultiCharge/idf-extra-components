@@ -126,11 +126,11 @@ static void check_file_content(const char *file_path, const char *expected)
 {
     ESP_LOGI(TAG, "Reading %s:", file_path);
     FILE *file = fopen(file_path, "r");
-    TEST_ASSERT_NOT_NULL_MESSAGE(file, "Could not open file\n");
+    TEST_ASSERT_NOT_NULL_MESSAGE(file, "Could not open file");
 
     char content[200];
     size_t read_cnt = fread(content, 1, sizeof(content), file);
-    TEST_ASSERT_EQUAL_MESSAGE(strlen(expected) + 1, read_cnt, "Error in reading file\n");
+    TEST_ASSERT_EQUAL_MESSAGE(strlen(expected), read_cnt, "Error in reading file");
     TEST_ASSERT_EQUAL_STRING(content, expected);
     fclose(file);
 }
