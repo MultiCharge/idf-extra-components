@@ -291,7 +291,7 @@ static esp_err_t cdc_acm_start(cdc_dev_t *cdc_dev, cdc_acm_host_dev_callback_t e
     // Claim data interface and start polling its IN endpoint
     ESP_GOTO_ON_ERROR(usb_host_interface_claim(p_cdc_acm_obj->cdc_acm_client_hdl, cdc_dev->dev_hdl, cdc_dev->data.intf_desc->bInterfaceNumber, 0), err, TAG,);
     if (cdc_dev->data.in_xfer) {
-        ESP_LOGD("CDC_ACM", "Submitting poll for BULK IN transfer");
+        ESP_LOGD("CDC_ACM", "Submitting poll for BULK IN transfer %u/%u B (act/num)", cdc_dev->data.in_xfer->actual_num_bytes, cdc_dev->data.in_xfer->num_bytes);
         ESP_ERROR_CHECK(usb_host_transfer_submit(cdc_dev->data.in_xfer));
     }
 
@@ -1007,8 +1007,8 @@ static bool cdc_acm_is_transfer_completed(usb_transfer_t *transfer)
 
 static void in_xfer_cb(usb_transfer_t *transfer)
 {
-    ESP_LOGD("CDC_ACM", "in xfer cb");
     cdc_dev_t *cdc_dev = (cdc_dev_t *)transfer->context;
+    ESP_LOGD("CDC_ACM", "in xfer cb %u B", transfer->actual_num_bytes);
 
     if (!cdc_acm_is_transfer_completed(transfer)) {
         return;
@@ -1033,7 +1033,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
 
             if (transfer->num_bytes == 0) {
                 // The IN buffer cannot accept more data, inform the user and reset the buffer
-                ESP_LOGW(TAG, "IN buffer overflow");
+                ESP_LOGW(TAG, "IN buffer overflow (%u/%u)", space_left, transfer->data_buffer_size);
                 cdc_dev->serial_state.bOverRun = true;
                 if (cdc_dev->notif.cb) {
                     const cdc_acm_host_dev_event_data_t serial_state_event = {
@@ -1051,7 +1051,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
         }
     }
 
-    ESP_LOGD("CDC_ACM", "Submitting poll for BULK IN transfer");
+    ESP_LOGD("CDC_ACM", "Submitting poll for initial BULK IN transfer %u/%u B (act/num)", transfer->actual_num_bytes, transfer->num_bytes);
     usb_host_transfer_submit(cdc_dev->data.in_xfer);
 }
 
@@ -1164,11 +1164,15 @@ esp_err_t cdc_acm_host_data_tx_blocking(cdc_acm_dev_hdl_t cdc_hdl, const uint8_t
         return ESP_ERR_TIMEOUT;
     }
 
-    ESP_LOGD("CDC_ACM", "Submitting BULK OUT transfer");
+    ESP_LOGD("CDC_ACM", "Submitting BULK OUT transfer %u B", data_len);
     memcpy(cdc_dev->data.out_xfer->data_buffer, data, data_len);
     cdc_dev->data.out_xfer->num_bytes = data_len;
     cdc_dev->data.out_xfer->timeout_ms = timeout_ms;
-    ESP_GOTO_ON_ERROR(usb_host_transfer_submit(cdc_dev->data.out_xfer), unblock, TAG,);
+    const esp_err_t err = usb_host_transfer_submit(cdc_dev->data.out_xfer);
+    if (err != ESP_OK) {
+        ESP_LOGE("CDC_ACM", "usb_host_transfer_submit() returned %s (%d)\n", esp_err_to_name(err), err);
+    }
+    ESP_GOTO_ON_ERROR(err, unblock, TAG, "err: %s (%u)", esp_err_to_name(err), err);
 
     // Wait for OUT transfer completion
     taken = xSemaphoreTake((SemaphoreHandle_t)cdc_dev->data.out_xfer->context, pdMS_TO_TICKS(timeout_ms));
@@ -1179,7 +1183,13 @@ esp_err_t cdc_acm_host_data_tx_blocking(cdc_acm_dev_hdl_t cdc_hdl, const uint8_t
         goto unblock;
     }
 
+    if (cdc_dev->data.out_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE("CDC_ACM", "usb_host_transfer_submit() status %d (expect %d)\n", cdc_dev->data.out_xfer->status, USB_TRANSFER_STATUS_COMPLETED);
+    }
     ESP_GOTO_ON_FALSE(cdc_dev->data.out_xfer->status == USB_TRANSFER_STATUS_COMPLETED, ESP_ERR_INVALID_RESPONSE, unblock, TAG, "Bulk OUT transfer error");
+    if (cdc_dev->data.out_xfer->actual_num_bytes != data_len) {
+        ESP_LOGE("CDC_ACM", "usb_host_transfer_submit() transferred %d/%u bytes\n", cdc_dev->data.out_xfer->actual_num_bytes, data_len);
+    }
     ESP_GOTO_ON_FALSE(cdc_dev->data.out_xfer->actual_num_bytes == data_len, ESP_ERR_INVALID_RESPONSE, unblock, TAG, "Incorrect number of bytes transferred");
     ret = ESP_OK;
 
